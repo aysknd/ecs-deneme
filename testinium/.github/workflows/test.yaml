@@ -1,0 +1,53 @@
+name: Docker build job
+
+on:
+  push:
+    branches:
+      - main
+
+env:
+  PROJECT_NAME: testinium-logo-service-7wxnl689
+  AWS_REGION: us-west-1
+  ECS_CLUSTER: testinium-cluster
+
+jobs:
+  buildDockerImage:
+    runs-on: ubuntu-latest
+ 
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+      
+      - name: Set short sha
+        id: sha_short
+        run: echo "sha_short=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID_DEV }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY_DEV }}
+          aws-region: ${{ env.AWS_REGION }}
+      
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build & Push Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ${{ steps.login-ecr.outputs.registry }}/${{ env.PROJECT_NAME }}:${{ steps.sha_short.outputs.sha_short }}
+            ${{ steps.login-ecr.outputs.registry }}/${{ env.PROJECT_NAME }}:latest
+
+      - name: Restart ECS service (pull latest)
+        run: |
+          aws ecs update-service \
+            --cluster ${{ env.ECS_CLUSTER }} \
+            --service ${{ env.PROJECT_NAME }}-service \
+            --region ${{ env.AWS_REGION }} \
+            --force-new-deployment
